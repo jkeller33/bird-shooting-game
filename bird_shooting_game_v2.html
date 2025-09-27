@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bird Shooting Game V2</title>
+    <style>
+        body { margin: 0; padding: 20px; background: #87CEEB; }
+        canvas { border: 2px solid #000; background: linear-gradient(to bottom, #87CEEB, #98FB98); }
+        #info { font-family: Arial; font-size: 18px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div id="info">Lives: <span id="lives">3</span> | Score: <span id="score">0</span> | Red Birds Left: <span id="redBirds">15</span> | Level: <span id="level">1</span></div>
+    <canvas id="game" width="800" height="600"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        
+        let lives = 3;
+        let score = 0;
+        let gameOver = false;
+        let wingFlap = 0;
+        let gunAngle = 0;
+        let lasers = [];
+        let redBirdsLeft = 15;
+        let explosions = [];
+        let level = 1;
+        let totalRedBirds = 15;
+        
+        // Audio context for sound
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound() {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.1);
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.1);
+        }
+        
+        function playExplosion() {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.2);
+            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.2);
+        }
+        
+        // Gun
+        const gun = { x: 750, y: 300 };
+        
+        // Birds
+        const birds = [];
+        
+        function createBirds() {
+            birds.length = 0;
+            const birdCount = 25 + (level - 1) * 5;
+            for(let i = 0; i < birdCount; i++) {
+                birds.push({
+                    x: Math.random() * 600 + 50,
+                    y: Math.random() * 500 + 50,
+                    vx: (Math.random() - 0.5) * 4 * level,
+                    vy: (Math.random() - 0.5) * 4 * level,
+                    color: i < totalRedBirds ? 'red' : 'black',
+                    alive: true,
+                    speedBoost: 1
+                });
+            }
+        }
+        
+        createBirds();
+        
+        // Controls
+        const keys = {};
+        document.addEventListener('keydown', e => {
+            if(!keys[e.code]) {
+                keys[e.code] = true;
+                if(e.code === 'ArrowLeft' && !gameOver) {
+                    // Shoot laser
+                    lasers.push({
+                        x: gun.x - 30,
+                        y: gun.y,
+                        angle: gunAngle,
+                        life: 0.2
+                    });
+                }
+            }
+        });
+        document.addEventListener('keyup', e => keys[e.code] = false);
+        
+        function update() {
+            if(gameOver) return;
+            
+            const dt = 1/60;
+            
+            // Gun control (fixed direction)
+            if(keys['ArrowUp']) gunAngle += 0.05;
+            if(keys['ArrowDown']) gunAngle -= 0.05;
+            gunAngle = Math.max(-Math.PI/3, Math.min(Math.PI/3, gunAngle));
+            
+            // Update lasers
+            for(let i = lasers.length - 1; i >= 0; i--) {
+                const laser = lasers[i];
+                laser.life -= dt;
+                
+                // Check bird collisions along laser path
+                const laserEndX = gun.x - 30 - Math.cos(laser.angle) * 800;
+                const laserEndY = gun.y - Math.sin(laser.angle) * 800;
+                
+                let hitBird = false;
+                for(let bird of birds) {
+                    if(!bird.alive) continue;
+                    
+                    // Check if bird intersects with laser line
+                    const A = laserEndY - laser.y;
+                    const B = laser.x - laserEndX;
+                    const C = laserEndX * laser.y - laser.x * laserEndY;
+                    const distance = Math.abs(A * bird.x + B * bird.y + C) / Math.sqrt(A * A + B * B);
+                    
+                    if(distance < 10) {
+                        explosions.push({
+                            x: bird.x,
+                            y: bird.y,
+                            particles: Array.from({length: 8}, () => ({
+                                x: bird.x,
+                                y: bird.y,
+                                vx: (Math.random() - 0.5) * 200,
+                                vy: (Math.random() - 0.5) * 200,
+                                life: 0.5
+                            }))
+                        });
+                        bird.alive = false;
+                        hitBird = true;
+                        playExplosion();
+                        
+                        if(bird.color === 'red') {
+                            score++;
+                            redBirdsLeft--;
+                            playSound();
+                            // Make remaining red birds faster
+                            for(let b of birds) {
+                                if(b.color === 'red' && b.alive) {
+                                    b.speedBoost += 0.5;
+                                }
+                            }
+                            if(redBirdsLeft === 0) {
+                                if(level < 5) {
+                                    level++;
+                                    redBirdsLeft = totalRedBirds;
+                                    createBirds();
+                                } else {
+                                    gameOver = true;
+                                }
+                            }
+                        } else {
+                            lives--;
+                            if(lives <= 0) gameOver = true;
+                        }
+                        break;
+                    }
+                }
+                
+                // Remove laser if it hit a bird or expired
+                if(hitBird || laser.life <= 0) {
+                    lasers.splice(i, 1);
+                }
+            }
+            
+            // Update explosions
+            for(let i = explosions.length - 1; i >= 0; i--) {
+                const explosion = explosions[i];
+                let allDead = true;
+                
+                for(let particle of explosion.particles) {
+                    if(particle.life > 0) {
+                        particle.x += particle.vx * dt;
+                        particle.y += particle.vy * dt;
+                        particle.life -= dt;
+                        allDead = false;
+                    }
+                }
+                
+                if(allDead) {
+                    explosions.splice(i, 1);
+                }
+            }
+            
+            // Move birds
+            wingFlap += 0.3;
+            for(let bird of birds) {
+                if(!bird.alive) continue;
+                bird.x += bird.vx * bird.speedBoost;
+                bird.y += bird.vy * bird.speedBoost;
+                
+                // Bounce off walls
+                if(bird.x < 0 || bird.x > canvas.width - 100) bird.vx *= -1;
+                if(bird.y < 0 || bird.y > canvas.height) bird.vy *= -1;
+            }
+        }
+        
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw birds
+            for(let bird of birds) {
+                if(!bird.alive) continue;
+                ctx.fillStyle = bird.color;
+                
+                // Bird body
+                ctx.beginPath();
+                ctx.ellipse(bird.x, bird.y, 6, 4, 0, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Flapping wings
+                const wingOffset = Math.sin(wingFlap * bird.speedBoost) * 3;
+                ctx.beginPath();
+                ctx.ellipse(bird.x - 4, bird.y + wingOffset, 8, 2, -0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.ellipse(bird.x + 4, bird.y + wingOffset, 8, 2, 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw explosions
+            for(let explosion of explosions) {
+                for(let particle of explosion.particles) {
+                    if(particle.life > 0) {
+                        ctx.fillStyle = `rgba(255, ${Math.floor(particle.life * 255)}, 0, ${particle.life})`;
+                        ctx.beginPath();
+                        ctx.arc(particle.x, particle.y, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            }
+            
+            // Draw gun
+            ctx.save();
+            ctx.translate(gun.x, gun.y);
+            ctx.rotate(gunAngle);
+            ctx.fillStyle = '#444';
+            ctx.fillRect(-40, -8, 40, 16);
+            ctx.fillStyle = '#666';
+            ctx.fillRect(-10, -12, 20, 24);
+            ctx.restore();
+            
+            // Draw laser beams
+            for(let laser of lasers) {
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(laser.x, laser.y);
+                ctx.lineTo(laser.x - Math.cos(laser.angle) * 800, laser.y - Math.sin(laser.angle) * 800);
+                ctx.stroke();
+                
+                // Laser glow effect
+                ctx.strokeStyle = 'rgba(255,100,100,0.5)';
+                ctx.lineWidth = 8;
+                ctx.stroke();
+            }
+            
+            // Game over
+            if(gameOver) {
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = 'white';
+                ctx.font = '48px Arial';
+                ctx.textAlign = 'center';
+                if(level >= 5 && redBirdsLeft === 0) {
+                    ctx.fillText('ALL LEVELS COMPLETE!', canvas.width/2, canvas.height/2);
+                } else if(lives <= 0) {
+                    ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
+                }
+                ctx.font = '24px Arial';
+                ctx.fillText('Final Score: ' + score, canvas.width/2, canvas.height/2 + 50);
+            }
+            
+            // Update UI
+            document.getElementById('lives').textContent = lives;
+            document.getElementById('score').textContent = score;
+            document.getElementById('redBirds').textContent = redBirdsLeft;
+            document.getElementById('level').textContent = level;
+        }
+        
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        gameLoop();
+    </script>
+</body>
+</html>
