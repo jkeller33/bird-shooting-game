@@ -1,46 +1,110 @@
+
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Bird Shooting Game V2</title>
+    <title>DaddyBird Game</title>
     <style>
         body { margin: 0; padding: 20px; background: #87CEEB; }
         canvas { border: 2px solid #000; background: linear-gradient(to bottom, #87CEEB, #98FB98); }
-        #info { font-family: Arial; font-size: 18px; margin-bottom: 10px; }
+        #info { font-family: Arial; font-size: 24px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        #timer { color: red; font-weight: bold; font-size: 36px; }
+        #player1Score { color: blue; font-weight: bold; }
+        #player2Score { color: green; font-weight: bold; }
+        #highScore { font-family: Arial; font-size: 18px; text-align: center; margin-top: 10px; color: #333; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="info">Lives: <span id="lives">3</span> | Score: <span id="score">0</span> | Red Birds Left: <span id="redBirds">15</span> | Level: <span id="level">1</span></div>
+    <div id="info">
+        <span id="player1Score">Nate: 0</span>
+        <span id="timer">120</span>
+        <span id="player2Score">DADDA: 0</span>
+    </div>
     <canvas id="game" width="800" height="600"></canvas>
+    <div id="highScore">High Score: 0</div>
     
     <script>
         const canvas = document.getElementById('game');
         const ctx = canvas.getContext('2d');
         
-        let lives = 3;
-        let score = 0;
+        let player1Score = 0;
+        let player2Score = 0;
         let gameOver = false;
         let wingFlap = 0;
-        let gunAngle = 0;
-        let lasers = [];
-        let redBirdsLeft = 15;
+        let gun1Angle = 0;
+        let gun2Angle = 0;
+        let bullets = [];
         let explosions = [];
-        let level = 1;
-        let totalRedBirds = 15;
+        let lastShotTime1 = 0;
+        let lastShotTime2 = 0;
+        let isShooting1 = false;
+        let isShooting2 = false;
+        let muzzleFireTime1 = 0;
+        let muzzleFireTime2 = 0;
+        let timer = 120;
+        let timerInterval;
+        let sword1Swing = 0;
+        let sword2Swing = 0;
+        let isSwinging1 = false;
+        let isSwinging2 = false;
+        let bombs = [];
+        let player1BombActive = false;
+        let player2BombActive = false;
+        let player1BombsLeft = 3;
+        let player2BombsLeft = 3;
+        
+        // Bullet count variables
+        let player1BulletsLeft = 110;
+        let player2BulletsLeft = 110;
+        let player1SlowBulletsLeft = 15;
+        let player2SlowBulletsLeft = 15;
+        
+        // Orange bird variables
+        let orangeBird = null;
+        let orangeBirdSpawned = false;
+        
+        // Ghost monster variables
+        let ghost = null;
+        let ghostSpawned = false;
+        let ghostRespawnTime = 0;
+        let player1Disabled = 0;
+        let player2Disabled = 0;
+        let ghostCollisionCooldown = 0;
+        
+        // Victory messages
+        let messageIndex = 0;
+        const allMessages = [
+            "Daddy's Mom is FAT!!!",
+            "Daddy's Dad is STUPID!!!",
+            "Daddy's Sister is LAZY!!!",
+            "Daddy's Dog is FAT!!!",
+            "Daddy's Mom is LAZY!!!",
+            "Daddy's Dad is FAT!!!",
+            "Nate YOUR MOMMA IS FAT!!!",
+            "Nate YOUR DAD IS STUPID!!!",
+            "Nate YOUR SISTER IS LAZY!!!",
+            "Nate YOUR DOG IS FAT!!!",
+            "Nate YOUR MOMMA IS LAZY!!!",
+            "Nate YOUR DAD IS FAT!!!"
+        ];
+        
+        // Load high score from localStorage
+        let highScore = parseInt(localStorage.getItem('daddyBirdHighScore')) || 0;
+        document.getElementById('highScore').textContent = `High Score: ${highScore}`;
         
         // Audio context for sound
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         
-        function playSound() {
+        function playLaserSound() {
             const oscillator = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
-            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
-            oscillator.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.1);
-            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            oscillator.frequency.setValueAtTime(1200, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.05);
+            gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.05);
             oscillator.start();
-            oscillator.stop(audioCtx.currentTime + 0.1);
+            oscillator.stop(audioCtx.currentTime + 0.05);
         }
         
         function playExplosion() {
@@ -56,78 +120,825 @@
             oscillator.stop(audioCtx.currentTime + 0.2);
         }
         
-        // Gun
-        const gun = { x: 750, y: 300 };
+        // Guns
+        const gun1 = { x: 750, y: 300 };
+        const gun2 = { x: 50, y: 300 };
         
         // Birds
         const birds = [];
         
         function createBirds() {
             birds.length = 0;
-            const birdCount = 25 + (level - 1) * 5;
-            for(let i = 0; i < birdCount; i++) {
+            
+            // 25 red birds
+            for(let i = 0; i < 25; i++) {
                 birds.push({
-                    x: Math.random() * 600 + 50,
+                    x: Math.random() * 600 + 100,
                     y: Math.random() * 500 + 50,
-                    vx: (Math.random() - 0.5) * 4 * level,
-                    vy: (Math.random() - 0.5) * 4 * level,
-                    color: i < totalRedBirds ? 'red' : 'black',
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4,
+                    color: 'red',
                     alive: true,
-                    speedBoost: 1
+                    speedMultiplier: 1,
+                    size: 6
+                });
+            }
+            
+            // 2 yellow birds - smaller and faster
+            for(let i = 0; i < 2; i++) {
+                birds.push({
+                    x: Math.random() * 600 + 100,
+                    y: Math.random() * 500 + 50,
+                    vx: (Math.random() - 0.5) * 6,
+                    vy: (Math.random() - 0.5) * 6,
+                    color: 'yellow',
+                    alive: true,
+                    speedMultiplier: 1.5,
+                    size: 4
+                });
+            }
+            
+            // 5 green birds
+            for(let i = 0; i < 5; i++) {
+                birds.push({
+                    x: Math.random() * 600 + 100,
+                    y: Math.random() * 500 + 50,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4,
+                    color: 'green',
+                    alive: true,
+                    speedMultiplier: 1,
+                    size: 6,
+                    lives: 2
+                });
+            }
+            
+            // 2 blue birds
+            for(let i = 0; i < 2; i++) {
+                birds.push({
+                    x: Math.random() * 600 + 100,
+                    y: Math.random() * 500 + 50,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4,
+                    color: 'blue',
+                    alive: true,
+                    speedMultiplier: 1,
+                    size: 6
+                });
+            }
+            
+            // 15 black birds
+            for(let i = 0; i < 15; i++) {
+                birds.push({
+                    x: Math.random() * 600 + 100,
+                    y: Math.random() * 500 + 50,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() - 0.5) * 4,
+                    color: 'black',
+                    alive: true,
+                    speedMultiplier: 1,
+                    size: 6
                 });
             }
         }
         
+        function startTimer() {
+            timer = 120;
+            orangeBirdSpawned = false; // Reset orange bird
+            ghostSpawned = false; // Reset ghost
+            ghostRespawnTime = 0;
+            ghostCollisionCooldown = 0; // Reset cooldown
+            
+            // Spawn ghost immediately
+            ghost = {
+                x: Math.random() * 600 + 100,
+                y: Math.random() * 400 + 100,
+                vx: (Math.random() - 0.5) * 12,
+                vy: (Math.random() - 0.5) * 12,
+                health: 10,
+                size: 18,
+                colorTime: 0,
+                turns: 0,
+                target: Math.random() < 0.5 ? 1 : 2
+            };
+            ghostSpawned = true;
+            
+            timerInterval = setInterval(() => {
+                timer--;
+                document.getElementById('timer').textContent = timer;
+                
+                // Spawn ghost right away
+                if(timer === 120 && !ghostSpawned) {
+                    ghost = {
+                        x: Math.random() * 600 + 100,
+                        y: Math.random() * 400 + 100,
+                        vx: (Math.random() - 0.5) * 12, // Much faster
+                        vy: (Math.random() - 0.5) * 12,
+                        health: 10,
+                        size: 18,
+                        colorTime: 0
+                    };
+                    ghostSpawned = true;
+                }
+                
+                // Respawn ghost at random time if first one was killed
+                if(ghostSpawned && !ghost && ghostRespawnTime === 0) {
+                    ghostRespawnTime = timer - Math.floor(Math.random() * 60 + 20); // 20-80 seconds remaining
+                }
+                
+                if(ghostRespawnTime > 0 && timer === ghostRespawnTime && !ghost) {
+                    ghost = {
+                        x: Math.random() * 600 + 100,
+                        y: Math.random() * 400 + 100,
+                        vx: (Math.random() - 0.5) * 12, // Much faster
+                        vy: (Math.random() - 0.5) * 12,
+                        health: 10,
+                        size: 18,
+                        colorTime: 0,
+                        turns: 0,
+                        target: Math.random() < 0.5 ? 1 : 2
+                    };
+                }
+                
+                // Spawn orange bird at 95 seconds (25 seconds after start)
+                if(timer === 95 && !orangeBirdSpawned) {
+                    console.log("Spawning orange bird!");
+                    orangeBird = {
+                        x: -50,
+                        y: Math.random() * 400 + 100,
+                        vx: 8,
+                        vy: 2,
+                        color: 'orange',
+                        alive: true,
+                        spawnTime: Date.now(),
+                        size: 5
+                    };
+                    orangeBirdSpawned = true;
+                }
+                
+                if(timer <= 0) {
+                    gameOver = true;
+                    clearInterval(timerInterval);
+                }
+            }, 1000);
+        }
+        
         createBirds();
+        startTimer();
+        
+        // Test: spawn orange bird immediately
+        orangeBird = {
+            x: 100,
+            y: 200,
+            vx: 8,
+            vy: 2,
+            color: 'orange',
+            alive: true,
+            spawnTime: Date.now(),
+            size: 5
+        };
+        
+        // Controller support
+        let controllers = {};
+        let player1BButtonPressed = false;
+        let player2BButtonPressed = false;
+        
+        window.addEventListener("gamepadconnected", (e) => {
+            controllers[e.gamepad.index] = e.gamepad;
+            console.log(`Controller ${e.gamepad.index} connected: ${e.gamepad.id}`);
+        });
+        
+        window.addEventListener("gamepaddisconnected", (e) => {
+            delete controllers[e.gamepad.index];
+            console.log(`Controller ${e.gamepad.index} disconnected`);
+        });
+        
+        function updateControllers() {
+            const gamepads = navigator.getGamepads();
+            for(let i = 0; i < gamepads.length; i++) {
+                if(gamepads[i]) {
+                    controllers[i] = gamepads[i];
+                }
+            }
+        }
         
         // Controls
         const keys = {};
         document.addEventListener('keydown', e => {
-            if(!keys[e.code]) {
-                keys[e.code] = true;
-                if(e.code === 'ArrowLeft' && !gameOver) {
-                    // Shoot laser
-                    lasers.push({
-                        x: gun.x - 30,
-                        y: gun.y,
-                        angle: gunAngle,
-                        life: 0.2
+            keys[e.code] = true;
+            if(e.code === 'ArrowLeft') isShooting1 = true;
+            if(e.code === 'Space') {
+                e.preventDefault();
+                isShooting2 = true;
+            }
+            if(e.code === 'Digit9') isSwinging1 = true;
+            if(e.code === 'KeyQ') isSwinging2 = true;
+            if(e.code === 'Digit8') {
+                if(!player1BombActive && player1BombsLeft > 0) {
+                    bombs.push({
+                        x: gun1.x - 30,
+                        y: gun1.y,
+                        vx: -Math.cos(gun1Angle) * 400,
+                        vy: -Math.sin(gun1Angle) * 400,
+                        player: 1
                     });
+                    player1BombActive = true;
+                    player1BombsLeft--;
+                } else if(player1BombActive) {
+                    // Explode the bomb
+                    for(let i = bombs.length - 1; i >= 0; i--) {
+                        if(bombs[i].player === 1) {
+                            const bomb = bombs[i];
+                            // Create explosion
+                            explosions.push({
+                                x: bomb.x,
+                                y: bomb.y,
+                                particles: Array.from({length: 20}, () => ({
+                                    x: bomb.x,
+                                    y: bomb.y,
+                                    vx: (Math.random() - 0.5) * 400,
+                                    vy: (Math.random() - 0.5) * 400,
+                                    life: 1
+                                }))
+                            });
+                            playExplosion();
+                            
+                            // Kill all birds within explosion radius (3 inch diameter for last bomb, 2 inch for others)
+                            const explosionRadius = player1BombsLeft === 0 ? 108 : 72; // 3 inch vs 2 inch diameter
+                            const explosionRadiusSquared = explosionRadius * explosionRadius;
+                            
+                            // Check ghost collision
+                            if(ghost) {
+                                const ghostDx = bomb.x - ghost.x;
+                                const ghostDy = bomb.y - ghost.y;
+                                if(ghostDx * ghostDx + ghostDy * ghostDy < explosionRadiusSquared) {
+                                    ghost.health -= 5; // Each bomb does 5 damage (2 bombs = 10 damage = kill)
+                                    if(ghost.health <= 0) {
+                                        explosions.push({
+                                            x: ghost.x,
+                                            y: ghost.y,
+                                            particles: Array.from({length: 15}, () => ({
+                                                x: ghost.x,
+                                                y: ghost.y,
+                                                vx: (Math.random() - 0.5) * 300,
+                                                vy: (Math.random() - 0.5) * 300,
+                                                life: 1
+                                            }))
+                                        });
+                                        player1Score += 10; // Player 1 gets the points
+                                        ghost = null;
+                                    }
+                                }
+                            }
+                            
+                            for(let bird of birds) {
+                                if(!bird.alive) continue;
+                                const dx = bomb.x - bird.x;
+                                const dy = bomb.y - bird.y;
+                                if(dx * dx + dy * dy < explosionRadiusSquared) {
+                                    bird.alive = false;
+                                    
+                                    if(bird.color === 'yellow') player1Score += 5;
+                                    else if(bird.color === 'red') {
+                                        player1Score++;
+                                        for(let b of birds) {
+                                            if(b.color === 'red' && b.alive) {
+                                                b.speedMultiplier += 0.3;
+                                            }
+                                        }
+                                    }
+                                    else if(bird.color === 'blue') player1Score = 0;
+                                    else if(bird.color === 'black') player1Score = Math.max(0, player1Score - 1);
+                                    else if(bird.color === 'green') player1Score += 2;
+                                }
+                            }
+                            
+                            // Check if game should end
+                            let redBirdsLeft = birds.filter(b => b.color === 'red' && b.alive).length;
+                            let yellowBirdsLeft = birds.filter(b => b.color === 'yellow' && b.alive).length;
+                            let greenBirdsLeft = birds.filter(b => b.color === 'green' && b.alive).length;
+                            
+                            if(redBirdsLeft === 0 && yellowBirdsLeft === 0 && greenBirdsLeft === 0) {
+                                gameOver = true;
+                                clearInterval(timerInterval);
+                            }
+                            
+                            bombs.splice(i, 1);
+                            player1BombActive = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            if(e.code === 'KeyA') {
+                if(!player2BombActive && player2BombsLeft > 0) {
+                    bombs.push({
+                        x: gun2.x + 30,
+                        y: gun2.y,
+                        vx: Math.cos(gun2Angle) * 400,
+                        vy: -Math.sin(gun2Angle) * 400,
+                        player: 2
+                    });
+                    player2BombActive = true;
+                    player2BombsLeft--;
+                } else if(player2BombActive) {
+                    // Explode the bomb
+                    for(let i = bombs.length - 1; i >= 0; i--) {
+                        if(bombs[i].player === 2) {
+                            const bomb = bombs[i];
+                            // Create explosion
+                            explosions.push({
+                                x: bomb.x,
+                                y: bomb.y,
+                                particles: Array.from({length: 20}, () => ({
+                                    x: bomb.x,
+                                    y: bomb.y,
+                                    vx: (Math.random() - 0.5) * 400,
+                                    vy: (Math.random() - 0.5) * 400,
+                                    life: 1
+                                }))
+                            });
+                            playExplosion();
+                            
+                            // Kill all birds within explosion radius (3 inch diameter for last bomb, 2 inch for others)
+                            const explosionRadius = player2BombsLeft === 0 ? 108 : 72; // 3 inch vs 2 inch diameter
+                            const explosionRadiusSquared = explosionRadius * explosionRadius;
+                            
+                            // Check ghost collision
+                            if(ghost) {
+                                const ghostDx = bomb.x - ghost.x;
+                                const ghostDy = bomb.y - ghost.y;
+                                if(ghostDx * ghostDx + ghostDy * ghostDy < explosionRadiusSquared) {
+                                    ghost.health -= 5; // Each bomb does 5 damage (2 bombs = 10 damage = kill)
+                                    if(ghost.health <= 0) {
+                                        explosions.push({
+                                            x: ghost.x,
+                                            y: ghost.y,
+                                            particles: Array.from({length: 15}, () => ({
+                                                x: ghost.x,
+                                                y: ghost.y,
+                                                vx: (Math.random() - 0.5) * 300,
+                                                vy: (Math.random() - 0.5) * 300,
+                                                life: 1
+                                            }))
+                                        });
+                                        player2Score += 10; // Player 2 gets the points
+                                        ghost = null;
+                                    }
+                                }
+                            }
+                            
+                            for(let bird of birds) {
+                                if(!bird.alive) continue;
+                                const dx = bomb.x - bird.x;
+                                const dy = bomb.y - bird.y;
+                                if(dx * dx + dy * dy < explosionRadiusSquared) {
+                                    bird.alive = false;
+                                    
+                                    if(bird.color === 'yellow') player2Score += 5;
+                                    else if(bird.color === 'red') {
+                                        player2Score++;
+                                        for(let b of birds) {
+                                            if(b.color === 'red' && b.alive) {
+                                                b.speedMultiplier += 0.3;
+                                            }
+                                        }
+                                    }
+                                    else if(bird.color === 'blue') player2Score = 0;
+                                    else if(bird.color === 'black') player2Score = Math.max(0, player2Score - 1);
+                                    else if(bird.color === 'green') player2Score += 2;
+                                }
+                            }
+                            
+                            // Check if game should end
+                            let redBirdsLeft = birds.filter(b => b.color === 'red' && b.alive).length;
+                            let yellowBirdsLeft = birds.filter(b => b.color === 'yellow' && b.alive).length;
+                            let greenBirdsLeft = birds.filter(b => b.color === 'green' && b.alive).length;
+                            
+                            if(redBirdsLeft === 0 && yellowBirdsLeft === 0 && greenBirdsLeft === 0) {
+                                gameOver = true;
+                                clearInterval(timerInterval);
+                            }
+                            
+                            bombs.splice(i, 1);
+                            player2BombActive = false;
+                            break;
+                        }
+                    }
                 }
             }
         });
-        document.addEventListener('keyup', e => keys[e.code] = false);
+        document.addEventListener('keyup', e => {
+            keys[e.code] = false;
+            if(e.code === 'ArrowLeft') isShooting1 = false;
+            if(e.code === 'Space') {
+                e.preventDefault();
+                isShooting2 = false;
+            }
+            if(e.code === 'Digit9') isSwinging1 = false;
+            if(e.code === 'KeyQ') isSwinging2 = false;
+        });
         
         function update() {
             if(gameOver) return;
             
             const dt = 1/60;
+            const currentTime = Date.now();
             
-            // Gun control (fixed direction)
-            if(keys['ArrowUp']) gunAngle += 0.05;
-            if(keys['ArrowDown']) gunAngle -= 0.05;
-            gunAngle = Math.max(-Math.PI/3, Math.min(Math.PI/3, gunAngle));
+            // Update controllers
+            updateControllers();
             
-            // Update lasers
-            for(let i = lasers.length - 1; i >= 0; i--) {
-                const laser = lasers[i];
-                laser.life -= dt;
+            // Controller input for Player 1 (Controller 0)
+            if(controllers[0]) {
+                const controller = controllers[0];
                 
-                // Check bird collisions along laser path
-                const laserEndX = gun.x - 30 - Math.cos(laser.angle) * 800;
-                const laserEndY = gun.y - Math.sin(laser.angle) * 800;
+                // Left stick Y-axis for gun angle (inverted)
+                const leftStickY = controller.axes[1];
+                if(Math.abs(leftStickY) > 0.1) {
+                    gun1Angle -= leftStickY * 0.03;
+                }
+                
+                // A button for shooting
+                if(controller.buttons[0].pressed) {
+                    isShooting1 = true;
+                } else {
+                    isShooting1 = false;
+                }
+                
+                // B button for bomb (single press)
+                if(controller.buttons[1].pressed && !player1BButtonPressed) {
+                    player1BButtonPressed = true;
+                    if(player1BombsLeft > 0) {
+                        bombs.push({
+                            x: gun1.x - 30,
+                            y: gun1.y,
+                            vx: -Math.cos(gun1Angle) * 400,
+                            vy: -Math.sin(gun1Angle) * 400,
+                            player: 1
+                        });
+                        player1BombActive = true;
+                        player1BombsLeft--;
+                    }
+                } else if(!controller.buttons[1].pressed) {
+                    player1BButtonPressed = false;
+                }
+                
+                // R button for sword rotation
+                if(controller.buttons[5].pressed) {
+                    isSwinging1 = true;
+                } else {
+                    isSwinging1 = false;
+                }
+            }
+            
+            // Controller input for Player 2 (Controller 1)
+            if(controllers[1]) {
+                const controller = controllers[1];
+                
+                // Left stick Y-axis for gun angle (fixed direction)
+                const leftStickY = controller.axes[1];
+                if(Math.abs(leftStickY) > 0.1) {
+                    gun2Angle -= leftStickY * 0.03;
+                }
+                
+                // A button for shooting
+                if(controller.buttons[0].pressed) {
+                    isShooting2 = true;
+                } else {
+                    isShooting2 = false;
+                }
+                
+                // R button for sword rotation
+                if(controller.buttons[5].pressed) {
+                    isSwinging2 = true;
+                } else {
+                    isSwinging2 = false;
+                }
+                
+                // B button for bomb (two-press system)
+                if(controller.buttons[1].pressed && !player2BButtonPressed) {
+                    player2BButtonPressed = true;
+                    if(!player2BombActive && player2BombsLeft > 0) {
+                        bombs.push({
+                            x: gun2.x + 30,
+                            y: gun2.y,
+                            vx: Math.cos(gun2Angle) * 400,
+                            vy: -Math.sin(gun2Angle) * 400,
+                            player: 2
+                        });
+                        player2BombActive = true;
+                        player2BombsLeft--;
+                    } else if(player2BombActive) {
+                        // Explode the bomb
+                        for(let i = bombs.length - 1; i >= 0; i--) {
+                            if(bombs[i].player === 2) {
+                                const bomb = bombs[i];
+                                explosions.push({
+                                    x: bomb.x,
+                                    y: bomb.y,
+                                    particles: Array.from({length: 20}, () => ({
+                                        x: bomb.x,
+                                        y: bomb.y,
+                                        vx: (Math.random() - 0.5) * 400,
+                                        vy: (Math.random() - 0.5) * 400,
+                                        life: 1
+                                    }))
+                                });
+                                playExplosion();
+                                
+                                // Check ghost collision
+                                if(ghost) {
+                                    const ghostDx = bomb.x - ghost.x;
+                                    const ghostDy = bomb.y - ghost.y;
+                                    if(ghostDx * ghostDx + ghostDy * ghostDy < 5184) {
+                                        ghost.health -= 5;
+                                        if(ghost.health <= 0) {
+                                            explosions.push({
+                                                x: ghost.x,
+                                                y: ghost.y,
+                                                particles: Array.from({length: 15}, () => ({
+                                                    x: ghost.x,
+                                                    y: ghost.y,
+                                                    vx: (Math.random() - 0.5) * 300,
+                                                    vy: (Math.random() - 0.5) * 300,
+                                                    life: 1
+                                                }))
+                                            });
+                                            player2Score += 10;
+                                            ghost = null;
+                                        }
+                                    }
+                                }
+                                
+                                for(let bird of birds) {
+                                    if(!bird.alive) continue;
+                                    const dx = bomb.x - bird.x;
+                                    const dy = bomb.y - bird.y;
+                                    if(dx * dx + dy * dy < 5184) {
+                                        bird.alive = false;
+                                        
+                                        if(bird.color === 'yellow') player2Score += 5;
+                                        else if(bird.color === 'red') {
+                                            player2Score++;
+                                            for(let b of birds) {
+                                                if(b.color === 'red' && b.alive) {
+                                                    b.speedMultiplier += 0.3;
+                                                }
+                                            }
+                                        }
+                                        else if(bird.color === 'blue') player2Score = 0;
+                                        else if(bird.color === 'black') player2Score = Math.max(0, player2Score - 1);
+                                        else if(bird.color === 'green') player2Score += 2;
+                                    }
+                                }
+                                
+                                let redBirdsLeft = birds.filter(b => b.color === 'red' && b.alive).length;
+                                let yellowBirdsLeft = birds.filter(b => b.color === 'yellow' && b.alive).length;
+                                let greenBirdsLeft = birds.filter(b => b.color === 'green' && b.alive).length;
+                                
+                                if(redBirdsLeft === 0 && yellowBirdsLeft === 0 && greenBirdsLeft === 0) {
+                                    gameOver = true;
+                                    clearInterval(timerInterval);
+                                }
+                                
+                                bombs.splice(i, 1);
+                                player2BombActive = false;
+                                break;
+                            }
+                        }
+                    }
+                } else if(!controller.buttons[1].pressed) {
+                    player2BButtonPressed = false;
+                }
+            }
+            
+            // Player 1 gun control (keyboard)
+            if(keys['ArrowUp']) gun1Angle += 0.05;
+            if(keys['ArrowDown']) gun1Angle -= 0.05;
+            gun1Angle = Math.max(-Math.PI/3, Math.min(Math.PI/3, gun1Angle));
+            
+            // Player 2 gun control (keyboard)
+            if(keys['KeyW']) gun2Angle += 0.05;
+            if(keys['KeyS']) gun2Angle -= 0.05;
+            gun2Angle = Math.max(-Math.PI/3, Math.min(Math.PI/3, gun2Angle));
+            
+            // Player 1 shooting
+            if(isShooting1 && player1BulletsLeft > 0 && currentTime - lastShotTime1 > 100 && player1Disabled < currentTime) {
+                bullets.push({
+                    x: gun1.x - 30,
+                    y: gun1.y,
+                    vx: -Math.cos(gun1Angle) * 3000,
+                    vy: -Math.sin(gun1Angle) * 3000,
+                    player: 1
+                });
+                playLaserSound();
+                lastShotTime1 = currentTime;
+                muzzleFireTime1 = currentTime + 250;
+                player1BulletsLeft--;
+            } else if(isShooting1 && player1BulletsLeft === 0 && player1SlowBulletsLeft > 0 && currentTime - lastShotTime1 > 500 && player1Disabled < currentTime) {
+                bullets.push({
+                    x: gun1.x - 30,
+                    y: gun1.y,
+                    vx: -Math.cos(gun1Angle) * 3000,
+                    vy: -Math.sin(gun1Angle) * 3000,
+                    player: 1
+                });
+                playLaserSound();
+                lastShotTime1 = currentTime;
+                muzzleFireTime1 = currentTime + 250;
+                player1SlowBulletsLeft--;
+            } else if(isShooting1 && player1BulletsLeft === 0 && player1SlowBulletsLeft === 0 && currentTime - lastShotTime1 > 5000 && player1Disabled < currentTime) {
+                bullets.push({
+                    x: gun1.x - 30,
+                    y: gun1.y,
+                    vx: -Math.cos(gun1Angle) * 3000,
+                    vy: -Math.sin(gun1Angle) * 3000,
+                    player: 1
+                });
+                playLaserSound();
+                lastShotTime1 = currentTime;
+                muzzleFireTime1 = currentTime + 250;
+            }
+            
+            // Player 2 shooting
+            if(isShooting2 && player2BulletsLeft > 0 && currentTime - lastShotTime2 > 100 && player2Disabled < currentTime) {
+                bullets.push({
+                    x: gun2.x + 30,
+                    y: gun2.y,
+                    vx: Math.cos(gun2Angle) * 3000,
+                    vy: -Math.sin(gun2Angle) * 3000,
+                    player: 2
+                });
+                playLaserSound();
+                lastShotTime2 = currentTime;
+                muzzleFireTime2 = currentTime + 250;
+                player2BulletsLeft--;
+            } else if(isShooting2 && player2BulletsLeft === 0 && player2SlowBulletsLeft > 0 && currentTime - lastShotTime2 > 500 && player2Disabled < currentTime) {
+                bullets.push({
+                    x: gun2.x + 30,
+                    y: gun2.y,
+                    vx: Math.cos(gun2Angle) * 3000,
+                    vy: -Math.sin(gun2Angle) * 3000,
+                    player: 2
+                });
+                playLaserSound();
+                lastShotTime2 = currentTime;
+                muzzleFireTime2 = currentTime + 250;
+                player2SlowBulletsLeft--;
+            } else if(isShooting2 && player2BulletsLeft === 0 && player2SlowBulletsLeft === 0 && currentTime - lastShotTime2 > 5000 && player2Disabled < currentTime) {
+                bullets.push({
+                    x: gun2.x + 30,
+                    y: gun2.y,
+                    vx: Math.cos(gun2Angle) * 3000,
+                    vy: -Math.sin(gun2Angle) * 3000,
+                    player: 2
+                });
+                playLaserSound();
+                lastShotTime2 = currentTime;
+                muzzleFireTime2 = currentTime + 250;
+            }
+            
+            // Update sword swings
+            if(isSwinging1) {
+                sword1Swing += 0.2;
+            } else {
+                sword1Swing = 0;
+            }
+            
+            if(isSwinging2) {
+                sword2Swing += 0.2;
+            } else {
+                sword2Swing = 0;
+            }
+            
+            // Check sword collisions
+            if(isSwinging1) {
+                const swordTipX = gun1.x + Math.cos(sword1Swing) * 18;
+                const swordTipY = gun1.y - 40 + Math.sin(sword1Swing) * 18;
+                
+                for(let bird of birds) {
+                    if(!bird.alive) continue;
+                    const dx = swordTipX - bird.x;
+                    const dy = swordTipY - bird.y;
+                    if(dx * dx + dy * dy < 400) {
+                        if(bird.color === 'green' && bird.lives > 1) {
+                            bird.lives--;
+                        } else {
+                            explosions.push({
+                                x: bird.x,
+                                y: bird.y,
+                                particles: Array.from({length: 8}, () => ({
+                                    x: bird.x,
+                                    y: bird.y,
+                                    vx: (Math.random() - 0.5) * 200,
+                                    vy: (Math.random() - 0.5) * 200,
+                                    life: 0.5
+                                }))
+                            });
+                            bird.alive = false;
+                            playExplosion();
+                            
+                            if(bird.color === 'yellow') player1Score += 5;
+                            else if(bird.color === 'red') {
+                                player1Score++;
+                                for(let b of birds) {
+                                    if(b.color === 'red' && b.alive) {
+                                        b.speedMultiplier += 0.3;
+                                    }
+                                }
+                            }
+                            else if(bird.color === 'blue') player1Score = 0;
+                            else if(bird.color === 'black') player1Score = Math.max(0, player1Score - 1);
+                            else if(bird.color === 'green') player1Score += 2;
+                        }
+                        
+                        // Check if game should end
+                        let redBirdsLeft = birds.filter(b => b.color === 'red' && b.alive).length;
+                        let yellowBirdsLeft = birds.filter(b => b.color === 'yellow' && b.alive).length;
+                        let greenBirdsLeft = birds.filter(b => b.color === 'green' && b.alive).length;
+                        
+                        if(redBirdsLeft === 0 && yellowBirdsLeft === 0 && greenBirdsLeft === 0) {
+                            gameOver = true;
+                            clearInterval(timerInterval);
+                        }
+                    }
+                }
+            }
+            
+            if(isSwinging2) {
+                const swordTipX = gun2.x + Math.cos(sword2Swing) * 18;
+                const swordTipY = gun2.y - 40 + Math.sin(sword2Swing) * 18;
+                
+                for(let bird of birds) {
+                    if(!bird.alive) continue;
+                    const dx = swordTipX - bird.x;
+                    const dy = swordTipY - bird.y;
+                    if(dx * dx + dy * dy < 400) {
+                        if(bird.color === 'green' && bird.lives > 1) {
+                            bird.lives--;
+                        } else {
+                            explosions.push({
+                                x: bird.x,
+                                y: bird.y,
+                                particles: Array.from({length: 8}, () => ({
+                                    x: bird.x,
+                                    y: bird.y,
+                                    vx: (Math.random() - 0.5) * 200,
+                                    vy: (Math.random() - 0.5) * 200,
+                                    life: 0.5
+                                }))
+                            });
+                            bird.alive = false;
+                            playExplosion();
+                            
+                            if(bird.color === 'yellow') player2Score += 5;
+                            else if(bird.color === 'red') {
+                                player2Score++;
+                                for(let b of birds) {
+                                    if(b.color === 'red' && b.alive) {
+                                        b.speedMultiplier += 0.3;
+                                    }
+                                }
+                            }
+                            else if(bird.color === 'blue') player2Score = 0;
+                            else if(bird.color === 'black') player2Score = Math.max(0, player2Score - 1);
+                            else if(bird.color === 'green') player2Score += 2;
+                        }
+                        
+                        // Check if game should end
+                        let redBirdsLeft = birds.filter(b => b.color === 'red' && b.alive).length;
+                        let yellowBirdsLeft = birds.filter(b => b.color === 'yellow' && b.alive).length;
+                        let greenBirdsLeft = birds.filter(b => b.color === 'green' && b.alive).length;
+                        
+                        if(redBirdsLeft === 0 && yellowBirdsLeft === 0 && greenBirdsLeft === 0) {
+                            gameOver = true;
+                            clearInterval(timerInterval);
+                        }
+                    }
+                }
+            }
+            
+            // Update bullets
+            for(let i = bullets.length - 1; i >= 0; i--) {
+                const bullet = bullets[i];
+                bullet.x += bullet.vx * dt;
+                bullet.y += bullet.vy * dt;
+                
+                // Remove bullets that go off screen
+                if(bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+                    bullets.splice(i, 1);
+                    continue;
+                }
                 
                 let hitBird = false;
+                
+                // Check collision with birds
                 for(let bird of birds) {
                     if(!bird.alive) continue;
                     
-                    // Check if bird intersects with laser line
-                    const A = laserEndY - laser.y;
-                    const B = laser.x - laserEndX;
-                    const C = laserEndX * laser.y - laser.x * laserEndY;
-                    const distance = Math.abs(A * bird.x + B * bird.y + C) / Math.sqrt(A * A + B * B);
-                    
-                    if(distance < 10) {
+                    const dx = bullet.x - bird.x;
+                    const dy = bullet.y - bird.y;
+                    if(dx * dx + dy * dy < 200) {
                         explosions.push({
                             x: bird.x,
                             y: bird.y,
@@ -140,39 +951,119 @@
                             }))
                         });
                         bird.alive = false;
-                        hitBird = true;
                         playExplosion();
+                        hitBird = true;
                         
-                        if(bird.color === 'red') {
-                            score++;
-                            redBirdsLeft--;
-                            playSound();
-                            // Make remaining red birds faster
-                            for(let b of birds) {
-                                if(b.color === 'red' && b.alive) {
-                                    b.speedBoost += 0.5;
+                        // Scoring based on bird color and player
+                        if(bullet.player === 1) {
+                            if(bird.color === 'red') {
+                                player1Score++;
+                                // Speed up all remaining red birds
+                                for(let b of birds) {
+                                    if(b.color === 'red' && b.alive) {
+                                        b.speedMultiplier += 0.3;
+                                    }
                                 }
                             }
-                            if(redBirdsLeft === 0) {
-                                if(level < 5) {
-                                    level++;
-                                    redBirdsLeft = totalRedBirds;
-                                    createBirds();
-                                } else {
-                                    gameOver = true;
-                                }
-                            }
+                            else if(bird.color === 'yellow') player1Score += 5;
+                            else if(bird.color === 'blue') player1Score = 0;
+                            else if(bird.color === 'black') player1Score = Math.max(0, player1Score - 1);
                         } else {
-                            lives--;
-                            if(lives <= 0) gameOver = true;
+                            if(bird.color === 'red') {
+                                player2Score++;
+                                // Speed up all remaining red birds
+                                for(let b of birds) {
+                                    if(b.color === 'red' && b.alive) {
+                                        b.speedMultiplier += 0.3;
+                                    }
+                                }
+                            }
+                            else if(bird.color === 'yellow') player2Score += 5;
+                            else if(bird.color === 'blue') player2Score = 0;
+                            else if(bird.color === 'black') player2Score = Math.max(0, player2Score - 1);
+                            else if(bird.color === 'green') player2Score += 2;
                         }
+                        
+                        // Check if game should end
+                        let redBirdsLeft = birds.filter(b => b.color === 'red' && b.alive).length;
+                        let yellowBirdsLeft = birds.filter(b => b.color === 'yellow' && b.alive).length;
+                        let greenBirdsLeft = birds.filter(b => b.color === 'green' && b.alive).length;
+                        
+                        if(redBirdsLeft === 0 && yellowBirdsLeft === 0 && greenBirdsLeft === 0) {
+                            gameOver = true;
+                            clearInterval(timerInterval);
+                        }
+                        
                         break;
                     }
                 }
                 
-                // Remove laser if it hit a bird or expired
-                if(hitBird || laser.life <= 0) {
-                    lasers.splice(i, 1);
+                // Check collision with ghost
+                if(ghost) {
+                    const dx = bullet.x - ghost.x;
+                    const dy = bullet.y - ghost.y;
+                    if(dx * dx + dy * dy < 900) { // Easier to hit
+                        ghost.health--;
+                        if(ghost.health <= 0) {
+                            explosions.push({
+                                x: ghost.x,
+                                y: ghost.y,
+                                particles: Array.from({length: 15}, () => ({
+                                    x: ghost.x,
+                                    y: ghost.y,
+                                    vx: (Math.random() - 0.5) * 300,
+                                    vy: (Math.random() - 0.5) * 300,
+                                    life: 1
+                                }))
+                            });
+                            playExplosion();
+                            
+                            // Give 10 points to the player who hit it
+                            if(bullet.player === 1) {
+                                player1Score += 10;
+                            } else {
+                                player2Score += 10;
+                            }
+                            
+                            ghost = null;
+                        }
+                        hitBird = true;
+                    }
+                }
+                
+                // Check collision with orange bird
+                if(orangeBird && orangeBird.alive) {
+                    const dx = bullet.x - orangeBird.x;
+                    const dy = bullet.y - orangeBird.y;
+                    if(dx * dx + dy * dy < 300) {
+                        explosions.push({
+                            x: orangeBird.x,
+                            y: orangeBird.y,
+                            particles: Array.from({length: 12}, () => ({
+                                x: orangeBird.x,
+                                y: orangeBird.y,
+                                vx: (Math.random() - 0.5) * 300,
+                                vy: (Math.random() - 0.5) * 300,
+                                life: 0.8
+                            }))
+                        });
+                        orangeBird.alive = false;
+                        playExplosion();
+                        hitBird = true;
+                        
+                        // Give 15 points to the player who hit it
+                        if(bullet.player === 1) {
+                            player1Score += 15;
+                        } else {
+                            player2Score += 15;
+                        }
+                        
+                        orangeBird = null;
+                    }
+                }
+                
+                if(hitBird) {
+                    bullets.splice(i, 1);
                 }
             }
             
@@ -195,39 +1086,201 @@
                 }
             }
             
+            // Update bombs
+            for(let i = bombs.length - 1; i >= 0; i--) {
+                const bomb = bombs[i];
+                bomb.x += bomb.vx * dt;
+                bomb.y += bomb.vy * dt;
+                
+                // Remove bombs that go off screen
+                if(bomb.x < -50 || bomb.x > canvas.width + 50 || bomb.y < -50 || bomb.y > canvas.height + 50) {
+                    bombs.splice(i, 1);
+                    if(bomb.player === 1) {
+                        player1BombActive = false;
+                    } else {
+                        player2BombActive = false;
+                    }
+                }
+            }
+            
             // Move birds
             wingFlap += 0.3;
             for(let bird of birds) {
                 if(!bird.alive) continue;
-                bird.x += bird.vx * bird.speedBoost;
-                bird.y += bird.vy * bird.speedBoost;
+                bird.x += bird.vx * bird.speedMultiplier;
+                bird.y += bird.vy * bird.speedMultiplier;
                 
                 // Bounce off walls
-                if(bird.x < 0 || bird.x > canvas.width - 100) bird.vx *= -1;
+                if(bird.x < 0 || bird.x > canvas.width) bird.vx *= -1;
                 if(bird.y < 0 || bird.y > canvas.height) bird.vy *= -1;
+            }
+            
+            // Update orange bird
+            if(orangeBird && orangeBird.alive) {
+                orangeBird.x += orangeBird.vx;
+                orangeBird.y += orangeBird.vy;
+                
+                // Bounce off walls to keep it on screen
+                if(orangeBird.x < 0 || orangeBird.x > canvas.width) orangeBird.vx *= -1;
+                if(orangeBird.y < 0 || orangeBird.y > canvas.height) orangeBird.vy *= -1;
+                
+                // Remove orange bird after 8 seconds
+                if(Date.now() - orangeBird.spawnTime > 8000) {
+                    orangeBird = null;
+                }
+            }
+            
+            // Update ghost
+            if(ghost) {
+                ghost.x += ghost.vx;
+                ghost.y += ghost.vy;
+                ghost.colorTime += 0.1;
+                
+                // Aim for target gun after 10 turns
+                if(ghost.turns >= 10 && ghost.target) {
+                    const targetGun = ghost.target === 1 ? gun1 : gun2;
+                    const dx = targetGun.x - ghost.x;
+                    const dy = targetGun.y - ghost.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if(distance > 0) {
+                        ghost.vx = (dx / distance) * 8;
+                        ghost.vy = (dy / distance) * 8;
+                    }
+                } else {
+                    // Random movement and turning
+                    if(Math.random() < 0.02) {
+                        ghost.vx = (Math.random() - 0.5) * 12;
+                        ghost.vy = (Math.random() - 0.5) * 12;
+                        ghost.turns++;
+                    }
+                }
+                
+                // Bounce off walls
+                if(ghost.x < 0 || ghost.x > canvas.width) {
+                    ghost.vx *= -1;
+                    ghost.turns++;
+                }
+                if(ghost.y < 0 || ghost.y > canvas.height) {
+                    ghost.vy *= -1;
+                    ghost.turns++;
+                }
+                
+                // Check collision with guns (not players)
+                if(ghostCollisionCooldown <= 0) {
+                    const dx1 = ghost.x - gun1.x;
+                    const dy1 = ghost.y - gun1.y;
+                    if(dx1 * dx1 + dy1 * dy1 < 1600) { // 40px collision radius
+                        player1Disabled = currentTime + 20000; // Disable gun for 20 seconds
+                        // Move ghost away from gun
+                        const distance = Math.sqrt(dx1 * dx1 + dy1 * dy1);
+                        if(distance > 0) {
+                            ghost.vx = (dx1 / distance) * 12;
+                            ghost.vy = (dy1 / distance) * 12;
+                        }
+                        ghost.target = null; // Stop targeting players
+                        ghostCollisionCooldown = 20; // 20 turns cooldown
+                    }
+                    
+                    const dx2 = ghost.x - gun2.x;
+                    const dy2 = ghost.y - gun2.y;
+                    if(dx2 * dx2 + dy2 * dy2 < 1600) { // 40px collision radius
+                        player2Disabled = currentTime + 20000; // Disable gun for 20 seconds
+                        // Move ghost away from gun
+                        const distance = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+                        if(distance > 0) {
+                            ghost.vx = (dx2 / distance) * 12;
+                            ghost.vy = (dy2 / distance) * 12;
+                        }
+                        ghost.target = null; // Stop targeting players
+                        ghostCollisionCooldown = 20; // 20 turns cooldown
+                    }
+                } else {
+                    ghostCollisionCooldown--;
+                }
             }
         }
         
         function draw() {
+            const currentTime = Date.now();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
             // Draw birds
             for(let bird of birds) {
                 if(!bird.alive) continue;
+                
                 ctx.fillStyle = bird.color;
+                const birdSize = bird.size || 6;
                 
                 // Bird body
                 ctx.beginPath();
-                ctx.ellipse(bird.x, bird.y, 6, 4, 0, 0, Math.PI * 2);
+                ctx.ellipse(bird.x, bird.y, birdSize, birdSize * 0.67, 0, 0, Math.PI * 2);
                 ctx.fill();
                 
                 // Flapping wings
-                const wingOffset = Math.sin(wingFlap * bird.speedBoost) * 3;
+                const wingOffset = Math.sin(wingFlap) * 3;
                 ctx.beginPath();
-                ctx.ellipse(bird.x - 4, bird.y + wingOffset, 8, 2, -0.3, 0, Math.PI * 2);
+                ctx.ellipse(bird.x - birdSize * 0.67, bird.y + wingOffset, birdSize * 1.33, birdSize * 0.33, -0.3, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.beginPath();
-                ctx.ellipse(bird.x + 4, bird.y + wingOffset, 8, 2, 0.3, 0, Math.PI * 2);
+                ctx.ellipse(bird.x + birdSize * 0.67, bird.y + wingOffset, birdSize * 1.33, birdSize * 0.33, 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw orange bird
+            if(orangeBird && orangeBird.alive) {
+                ctx.fillStyle = 'orange';
+                const birdSize = orangeBird.size;
+                
+                // Bird body
+                ctx.beginPath();
+                ctx.ellipse(orangeBird.x, orangeBird.y, birdSize, birdSize * 0.67, 0, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Flapping wings
+                const wingOffset = Math.sin(wingFlap) * 3;
+                ctx.beginPath();
+                ctx.ellipse(orangeBird.x - birdSize * 0.67, orangeBird.y + wingOffset, birdSize * 1.33, birdSize * 0.33, -0.3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.ellipse(orangeBird.x + birdSize * 0.67, orangeBird.y + wingOffset, birdSize * 1.33, birdSize * 0.33, 0.3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw ghost
+            if(ghost) {
+                const colors = ['white', 'red', 'blue', 'green', 'yellow', 'purple'];
+                const currentColor = colors[Math.floor(ghost.colorTime) % colors.length];
+                
+                ctx.fillStyle = currentColor;
+                ctx.strokeStyle = 'black';
+                ctx.lineWidth = 2;
+                
+                // Ghost body (oval)
+                ctx.beginPath();
+                ctx.ellipse(ghost.x, ghost.y, ghost.size, ghost.size * 1.2, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Ghost bottom wavy edge
+                ctx.fillStyle = currentColor;
+                ctx.beginPath();
+                ctx.moveTo(ghost.x - ghost.size, ghost.y + ghost.size);
+                for(let i = 0; i < 4; i++) {
+                    ctx.lineTo(ghost.x - ghost.size + (i * ghost.size/2), ghost.y + ghost.size + Math.sin(i) * 5);
+                }
+                ctx.lineTo(ghost.x + ghost.size, ghost.y + ghost.size);
+                ctx.lineTo(ghost.x + ghost.size, ghost.y);
+                ctx.lineTo(ghost.x - ghost.size, ghost.y);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Eyes
+                ctx.fillStyle = 'black';
+                ctx.beginPath();
+                ctx.arc(ghost.x - 8, ghost.y - 5, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.arc(ghost.x + 8, ghost.y - 5, 3, 0, Math.PI * 2);
                 ctx.fill();
             }
             
@@ -243,52 +1296,162 @@
                 }
             }
             
-            // Draw gun
+            // Draw gun 1 (right side)
             ctx.save();
-            ctx.translate(gun.x, gun.y);
-            ctx.rotate(gunAngle);
-            ctx.fillStyle = '#444';
-            ctx.fillRect(-40, -8, 40, 16);
-            ctx.fillStyle = '#666';
-            ctx.fillRect(-10, -12, 20, 24);
+            ctx.translate(gun1.x, gun1.y);
+            ctx.rotate(gun1Angle);
+            
+            ctx.fillStyle = '#333';
+            ctx.fillRect(-50, -4, 50, 8);
+            ctx.fillStyle = '#555';
+            ctx.fillRect(-25, -12, 30, 24);
+            
+            // Sword above gun
+            ctx.save();
+            ctx.translate(0, -40);
+            ctx.rotate(sword1Swing);
+            ctx.fillStyle = '#c0c0c0';
+            ctx.fillRect(-2, -18, 4, 18);
+            ctx.fillStyle = '#8b4513';
+            ctx.fillRect(-4, 0, 8, 5);
             ctx.restore();
             
-            // Draw laser beams
-            for(let laser of lasers) {
-                ctx.strokeStyle = 'red';
-                ctx.lineWidth = 4;
+            if(currentTime < muzzleFireTime1) {
+                ctx.fillStyle = 'red';
                 ctx.beginPath();
-                ctx.moveTo(laser.x, laser.y);
-                ctx.lineTo(laser.x - Math.cos(laser.angle) * 800, laser.y - Math.sin(laser.angle) * 800);
-                ctx.stroke();
+                ctx.arc(-50, 0, 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+            
+            // Draw gun 2 (left side)
+            ctx.save();
+            ctx.translate(gun2.x, gun2.y);
+            ctx.rotate(-gun2Angle);
+            
+            ctx.fillStyle = '#333';
+            ctx.fillRect(0, -4, 50, 8);
+            ctx.fillStyle = '#555';
+            ctx.fillRect(-5, -12, 30, 24);
+            
+            // Sword above gun
+            ctx.save();
+            ctx.translate(0, -40);
+            ctx.rotate(sword2Swing);
+            ctx.fillStyle = '#c0c0c0';
+            ctx.fillRect(-2, -18, 4, 18);
+            ctx.fillStyle = '#8b4513';
+            ctx.fillRect(-4, 0, 8, 5);
+            ctx.restore();
+            
+            if(currentTime < muzzleFireTime2) {
+                ctx.fillStyle = 'red';
+                ctx.beginPath();
+                ctx.arc(50, 0, 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            ctx.restore();
+            
+            // Draw bullets
+            for(let bullet of bullets) {
+                ctx.fillStyle = bullet.player === 1 ? 'blue' : 'green';
+                ctx.beginPath();
+                ctx.arc(bullet.x, bullet.y, 8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            
+            // Draw bombs
+            for(let bomb of bombs) {
+                ctx.fillStyle = bomb.player === 1 ? 'darkblue' : 'darkgreen';
+                ctx.beginPath();
+                ctx.arc(bomb.x, bomb.y, 12, 0, Math.PI * 2);
+                ctx.fill();
                 
-                // Laser glow effect
-                ctx.strokeStyle = 'rgba(255,100,100,0.5)';
-                ctx.lineWidth = 8;
+                // Draw fuse
+                ctx.strokeStyle = 'orange';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(bomb.x, bomb.y - 12);
+                ctx.lineTo(bomb.x, bomb.y - 20);
                 ctx.stroke();
             }
             
             // Game over
             if(gameOver) {
-                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                // Check and update high score
+                const finalScore = Math.max(player1Score, player2Score);
+                if(finalScore > highScore) {
+                    highScore = finalScore;
+                    localStorage.setItem('daddyBirdHighScore', highScore);
+                    document.getElementById('highScore').textContent = `High Score: ${highScore}`;
+                }
+                
+                ctx.fillStyle = 'rgba(0,0,0,0.8)';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.fillStyle = 'white';
-                ctx.font = '48px Arial';
+                ctx.font = '72px Arial';
                 ctx.textAlign = 'center';
-                if(level >= 5 && redBirdsLeft === 0) {
-                    ctx.fillText('ALL LEVELS COMPLETE!', canvas.width/2, canvas.height/2);
-                } else if(lives <= 0) {
-                    ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
+                
+                if(player1Score > player2Score) {
+                    ctx.fillText('NATE WINS!!', canvas.width/2, canvas.height/2);
+                } else if(player2Score > player1Score) {
+                    ctx.fillText('DADDA WINS!!', canvas.width/2, canvas.height/2);
+                } else {
+                    ctx.fillText('TIE GAME!', canvas.width/2, canvas.height/2);
                 }
+                
                 ctx.font = '24px Arial';
-                ctx.fillText('Final Score: ' + score, canvas.width/2, canvas.height/2 + 50);
+                ctx.fillText(`Final Scores - Nate: ${player1Score}, DADDA: ${player2Score}`, canvas.width/2, canvas.height/2 + 200);
+            }
+            
+            // Show bullet count at bottom
+            ctx.fillStyle = 'black';
+            ctx.font = '18px Arial';
+            ctx.textAlign = 'left';
+            if(player1BulletsLeft > 0) {
+                ctx.fillText(`Nate Bullets: ${player1BulletsLeft}`, 10, canvas.height - 10);
+            } else if(player1SlowBulletsLeft > 0) {
+                ctx.fillText(`Nate Slow: ${player1SlowBulletsLeft}`, 10, canvas.height - 10);
+            } else {
+                ctx.fillText(`Nate: Very Slow Gun`, 10, canvas.height - 10);
+            }
+            ctx.textAlign = 'right';
+            if(player2BulletsLeft > 0) {
+                ctx.fillText(`DADDA Bullets: ${player2BulletsLeft}`, canvas.width - 10, canvas.height - 10);
+            } else if(player2SlowBulletsLeft > 0) {
+                ctx.fillText(`DADDA Slow: ${player2SlowBulletsLeft}`, canvas.width - 10, canvas.height - 10);
+            } else {
+                ctx.fillText(`DADDA: Very Slow Gun`, canvas.width - 10, canvas.height - 10);
+            }
+            
+            // Draw bullet bars
+            // Player 1 bar (left side)
+            ctx.fillStyle = 'gray';
+            ctx.fillRect(10, canvas.height - 40, 200, 20);
+            if(player1BulletsLeft > 0) {
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(10, canvas.height - 40, (player1BulletsLeft / 110) * 200, 20);
+            } else if(player1SlowBulletsLeft > 0) {
+                ctx.fillStyle = 'orange';
+                ctx.fillRect(10, canvas.height - 40, (player1SlowBulletsLeft / 15) * 200, 20);
+            }
+            
+            // Player 2 bar (right side)
+            ctx.fillStyle = 'gray';
+            ctx.fillRect(canvas.width - 210, canvas.height - 40, 200, 20);
+            if(player2BulletsLeft > 0) {
+                ctx.fillStyle = 'green';
+                ctx.fillRect(canvas.width - 210, canvas.height - 40, (player2BulletsLeft / 110) * 200, 20);
+            } else if(player2SlowBulletsLeft > 0) {
+                ctx.fillStyle = 'orange';
+                ctx.fillRect(canvas.width - 210, canvas.height - 40, (player2SlowBulletsLeft / 15) * 200, 20);
             }
             
             // Update UI
-            document.getElementById('lives').textContent = lives;
-            document.getElementById('score').textContent = score;
-            document.getElementById('redBirds').textContent = redBirdsLeft;
-            document.getElementById('level').textContent = level;
+            document.getElementById('player1Score').textContent = `Nate: ${player1Score}`;
+            document.getElementById('player2Score').textContent = `DADDA: ${player2Score}`;
         }
         
         function gameLoop() {
